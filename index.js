@@ -38,12 +38,12 @@ let notificationCollection;
 
 export async function connectToMongoDB() {
   try {
-    await client.connect(); 
+    await client.connect();
 
-    db = client.db("doc_sheba_db"); 
+    db = client.db("doc_sheba_db");
 
     // Collection Initializations
-    userCollection = db.collection("user"); 
+    userCollection = db.collection("user");
     patientCollection = db.collection("patients");
     doctorCollection = db.collection("doctors");
     assistantCollection = db.collection("assistants");
@@ -76,8 +76,6 @@ export async function disconnectFromMongoDB() {
 app.get("/", (req, res) => {
   res.send("DocSheba Server Running!");
 });
-
-
 
 // User API Routes
 app.post("/user", async (req, res) => {
@@ -195,6 +193,36 @@ app.delete("/users/:id", async (req, res) => {
       error: error.message,
     });
   }
+});
+
+app.get("/api/my/doctors", async (req, res) => {
+  const query = {};
+  if (req.query.doctorID) {
+    query.doctorID = req.query.doctorID;
+  }
+  const result = await doctorCollection.findOne(query);
+  res.send(result);
+});
+
+app.post("/api/doctors", async (req, res) => {
+  const doctor = req.body;
+  const result = await doctorCollection.insertOne(doctor);
+  res.send(result);
+});
+
+app.get("/api/my/patients", async (req, res) => {
+  const query = {};
+  if (req.query.patientID) {
+    query.patientID = req.query.patientID;
+  }
+  const result = await patientCollection.findOne(query);
+  res.send(result);
+});
+
+app.post("/api/patients", async (req, res) => {
+  const patient = req.body;
+  const result = await patientCollection.insertOne(patient);
+  res.send(result);
 });
 
 // Start Server
