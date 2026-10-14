@@ -334,62 +334,18 @@ app.get("/api/my/patients", async (req, res) => {
 });
 
 app.post("/api/patients", async (req, res) => {
-  if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
-    return res.status(400).send({
-      success: false,
-      message: "Patient details must be provided as an object",
-    });
-  }
-
-  const patient = { ...req.body };
-  delete patient.patientID;
-  delete patient._id;
-
   try {
-    const year = new Date().getFullYear();
-    await initializePatientCounter(year);
-    let result;
+    const patient = req.body;
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const counter = await patientCounterCollection.findOneAndUpdate(
-        { _id: `patientID-${year}` },
-        { $inc: { sequence: 1 } },
-        {
-          upsert: true,
-          returnDocument: "after",
-          includeResultMetadata: false,
-        }
-      );
+    const result = await patientCollection.insertOne(patient);
 
-      if (!counter || !Number.isSafeInteger(counter.sequence)) {
-        throw new Error("The patient ID counter returned an invalid sequence");
-      }
-
-      patient.patientID = `PAT-${year}-${String(counter.sequence).padStart(5, "0")}`;
-
-      try {
-        result = await patientCollection.insertOne(patient);
-        break;
-      } catch (error) {
-        const isDuplicatePatientID =
-          error.code === 11000 && error.keyPattern?.patientID;
-        if (!isDuplicatePatientID || attempt === 2) throw error;
-      }
-    }
-
-    if (!result) throw new Error("Patient document insertion returned no result");
-    res.status(201).send({ ...patient, _id: result.insertedId });
+    res.status(201).send({
+      success: true,
+      message: "Patient created successfully",
+      insertedId: result.insertedId,
+    });
   } catch (error) {
     console.error("Failed to create patient:", error);
-    const isDuplicatePatientID =
-      error.code === 11000 && error.keyPattern?.patientID;
-
-    if (isDuplicatePatientID) {
-      return res.status(409).send({
-        success: false,
-        message: "The generated patient ID already exists. Please retry.",
-      });
-    }
 
     res.status(500).send({
       success: false,
@@ -435,6 +391,38 @@ app.post("/appointments", async (req, res) => {
       success: false,
       message: "Failed to create appointment.",
     });
+  }
+});
+
+app.get("/api/doctor/all-appointments", async (req, res) => {
+  if (!req.query.doctorID) {
+    return res.status(400).send({ message: "doctorID is required" });
+  }
+
+  try {
+    const result = await appointmentCollection
+      .find({ doctorId: req.query.doctorID })
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Failed to fetch doctor appointments:", error);
+    res.status(500).send({ message: "Failed to fetch doctor appointments" });
+  }
+});
+
+app.get("/api/patient/my-appointments", async (req, res) => {
+  if (!req.query.patientID) {
+    return res.status(400).send({ message: "patientID is required" });
+  }
+
+  try {
+    const result = await appointmentCollection
+      .find({ patientId: req.query.patientID })
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Failed to fetch patient appointments:", error);
+    res.status(500).send({ message: "Failed to fetch patient appointments" });
   }
 });
 
