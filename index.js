@@ -398,6 +398,46 @@ app.post("/api/patients", async (req, res) => {
   }
 });
 
+// POST: Create a new appointment
+app.post("/appointments", async (req, res) => {
+  try {
+    const appointment = req.body;
+
+    // Required field validation
+    if (
+      !appointment.patientId ||
+      !appointment.doctorId
+    ) {
+      return res.status(400).send({
+        success: false,
+        message:
+          "Patient ID, Doctor ID, appointment date, and time are required.",
+      });
+    }
+
+    // Set default values
+    appointment.status = "pending";
+    appointment.createdAt = new Date();
+    appointment.updatedAt = new Date();
+
+    // Insert appointment into MongoDB
+    const result = await appointmentCollection.insertOne(appointment);
+
+    res.status(201).send({
+      success: true,
+      message: "Appointment created successfully.",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("Failed to create appointment:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to create appointment.",
+    });
+  }
+});
+
 // Start Server
 async function startServer() {
   try {
