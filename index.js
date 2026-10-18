@@ -426,6 +426,71 @@ app.get("/api/patient/my-appointments", async (req, res) => {
   }
 });
 
+app.patch("/appointments/:id/status", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ success: false, message: "Invalid Appointment ID" });
+    }
+
+    if (!status) {
+      return res.status(400).send({ success: false, message: "Status is required" });
+    }
+
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = {
+      $set: {
+        status: status,
+        updatedAt: new Date(),
+      },
+    };
+
+    const result = await appointmentCollection.updateOne(filter, updateDoc);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ success: false, message: "Appointment not found" });
+    }
+
+    res.send({
+      success: true,
+      message: `Appointment status updated to ${status}`,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    console.error("Failed to update status:", error);
+    res.status(500).send({ success: false, message: "Failed to update appointment status" });
+  }
+});
+
+
+app.delete("/appointments/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ success: false, message: "Invalid Appointment ID" });
+    }
+
+    const query = { _id: new ObjectId(id) };
+    const result = await appointmentCollection.deleteOne(query);
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ success: false, message: "Appointment not found" });
+    }
+
+    res.send({
+      success: true,
+      message: "Appointment deleted successfully",
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("Failed to delete appointment:", error);
+    res.status(500).send({ success: false, message: "Failed to delete appointment" });
+  }
+});
+
 // Start Server
 async function startServer() {
   try {
