@@ -13,6 +13,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
+
 // MongoDB connection URI
 const uri = process.env.MONGO_DB_URI;
 
@@ -36,6 +37,7 @@ let scheduleCollection;
 let medicalRecordCollection;
 let prescriptionCollection;
 let notificationCollection;
+let sessionCollection;
 const patientCounterInitialization = new Map();
 
 async function initializePatientCounter(year) {
@@ -100,6 +102,7 @@ export async function connectToMongoDB() {
     medicalRecordCollection = db.collection("medicalRecords");
     prescriptionCollection = db.collection("prescriptions");
     notificationCollection = db.collection("notifications");
+    sessionCollection = db.collection("session");
 
     try {
       await patientCollection.createIndex(
@@ -153,6 +156,48 @@ export async function disconnectFromMongoDB() {
   console.log("MongoDB connection closed.");
 }
 
+//Verification Middleware
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers?.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(403).send({ message: 'forbidden access' })
+  }
+  const query = { token: token };
+  const session = await sessionCollection.findOne(query);
+  const userId = session?.userId;
+  const userQuery = { _id: userId };
+  const user = await userCollection.findOne(userQuery);
+  req.user = user;
+  next();
+}
+
+const verifyPatient = async (req, res, next) => {
+  if(req.user?.role !== 'patient') {
+    return res.status(403).send({ message: 'forbidden access' })
+  }
+  next();
+}
+
+const verifyDoctor = async (req, res, next) => { 
+  if(req.user?.role !== 'doctor') {
+    return res.status(403).send({ message: 'forbidden access' })
+  }
+  next();     
+}
+
+const verifyAdmin = async (req, res, next) => { 
+  if(req.user?.role !== 'admin') {
+    return res.status(403).send({ message: 'forbidden access' })
+  } 
+  next();
+}
+
 // Base Routes
 app.get("/", (req, res) => {
   res.send("DocSheba Server Running!");
@@ -183,7 +228,7 @@ app.post("/user", async (req, res) => {
   }
 });
 
-app.get("/user", async (req, res) => {
+app.get("/user",verifyToken, async (req, res) => {
   try {
     const result = await userCollection
       .find()
