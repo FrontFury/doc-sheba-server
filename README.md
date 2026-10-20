@@ -94,13 +94,15 @@ Ensure you have the following installed on your local development machine:
    ```env
    PORT=5000
    NODE_ENV=development
-   MONGO_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/docsheba?retryWrites=true&w=majority
+   MONGO_DB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/docsheba?retryWrites=true&w=majority
    JWT_SECRET=your_super_secret_jwt_key
    JWT_EXPIRES_IN=7d
    CLOUDINARY_CLOUD_NAME=your_cloud_name
    CLOUDINARY_API_KEY=your_api_key
    CLOUDINARY_API_SECRET=your_api_secret
    ```
+
+   For Vercel, add `MONGO_DB_URI` in **Project Settings → Environment Variables** for the environments you deploy to. The server also accepts `MONGO_URI` for existing deployments.
 
 4. **Run the Application:**
 

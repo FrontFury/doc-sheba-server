@@ -15,15 +15,10 @@ app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 
 // MongoDB connection URI
-const uri = process.env.MONGO_DB_URI;
+const uri = process.env.MONGO_DB_URI || process.env.MONGO_URI;
 
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
-});
+let client;
+let connectionPromise;
 
 let db;
 let userCollection;
@@ -85,76 +80,113 @@ async function initializePatientCounter(year) {
 }
 
 export async function connectToMongoDB() {
-  try {
-    await client.connect();
-
-    db = client.db("doc_sheba_db");
-
-    // Collection Initializations
-    userCollection = db.collection("user");
-    patientCollection = db.collection("patients");
-    patientCounterCollection = db.collection("counters");
-    doctorCollection = db.collection("doctors");
-    assistantCollection = db.collection("assistants");
-    departmentCollection = db.collection("departments");
-    appointmentCollection = db.collection("appointments");
-    scheduleCollection = db.collection("schedules");
-    medicalRecordCollection = db.collection("medicalRecords");
-    prescriptionCollection = db.collection("prescriptions");
-    notificationCollection = db.collection("notifications");
-    sessionCollection = db.collection("session");
-
-    try {
-      await patientCollection.createIndex(
-        { patientID: 1 },
-        {
-          unique: true,
-          partialFilterExpression: {
-            patientID: { $type: "string", $gt: "" },
-          },
-          name: "unique_nonempty_patient_id",
-        }
-      );
-    } catch (error) {
-      console.error(
-        "Could not create a unique patientID index. Resolve duplicate existing patient IDs before restarting.",
-        error
-      );
-      throw error;
-    }
-
-    await initializePatientCounter(new Date().getFullYear());
-
-    const patientsWithoutID = await patientCollection.countDocuments({
-      $or: [
-        { patientID: { $exists: false } },
-        { patientID: null },
-        { patientID: "" },
-      ],
-    });
-    if (patientsWithoutID > 0) {
-      console.warn(
-        `${patientsWithoutID} existing patient record(s) have no patientID. Backfill only after confirming their account mapping.`
-      );
-    }
-
-    console.log("Successfully connected to MongoDB!");
-
-    // Ping admin DB to confirm connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged deployment. All database collections are ready!");
-
-    return db;
-  } catch (error) {
-    console.error("MongoDB connection failed:", error);
-    throw error;
+  if (!uri) {
+    throw new Error(
+      "Missing MongoDB connection string. Set MONGO_DB_URI or MONGO_URI."
+    );
   }
+
+  if (!connectionPromise) {
+    client = new MongoClient(uri, {
+      serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+      },
+    });
+
+    connectionPromise = (async () => {
+      await client.connect();
+
+      db = client.db("doc_sheba_db");
+
+      // Collection Initializations
+      userCollection = db.collection("user");
+      patientCollection = db.collection("patients");
+      patientCounterCollection = db.collection("counters");
+      doctorCollection = db.collection("doctors");
+      assistantCollection = db.collection("assistants");
+      departmentCollection = db.collection("departments");
+      appointmentCollection = db.collection("appointments");
+      scheduleCollection = db.collection("schedules");
+      medicalRecordCollection = db.collection("medicalRecords");
+      prescriptionCollection = db.collection("prescriptions");
+      notificationCollection = db.collection("notifications");
+      sessionCollection = db.collection("session");
+
+      try {
+        await patientCollection.createIndex(
+          { patientID: 1 },
+          {
+            unique: true,
+            partialFilterExpression: {
+              patientID: { $type: "string", $gt: "" },
+            },
+            name: "unique_nonempty_patient_id",
+          }
+        );
+      } catch (error) {
+        console.error(
+          "Could not create a unique patientID index. Resolve duplicate existing patient IDs before restarting.",
+          error
+        );
+        throw error;
+      }
+
+      await initializePatientCounter(new Date().getFullYear());
+
+      const patientsWithoutID = await patientCollection.countDocuments({
+        $or: [
+          { patientID: { $exists: false } },
+          { patientID: null },
+          { patientID: "" },
+        ],
+      });
+      if (patientsWithoutID > 0) {
+        console.warn(
+          `${patientsWithoutID} existing patient record(s) have no patientID. Backfill only after confirming their account mapping.`
+        );
+      }
+
+      console.log("Successfully connected to MongoDB!");
+
+      // Ping admin DB to confirm connection
+      // await client.db("admin").command({ ping: 1 });
+      console.log("Pinged deployment. All database collections are ready!");
+
+      return db;
+    })().catch((error) => {
+      connectionPromise = undefined;
+      client = undefined;
+      console.error("MongoDB connection failed:", error);
+      throw error;
+    });
+  }
+
+  return connectionPromise;
 }
 
 export async function disconnectFromMongoDB() {
-  await client.close();
-  console.log("MongoDB connection closed.");
+  if (client) {
+    await client.close();
+    client = undefined;
+    connectionPromise = undefined;
+    console.log("MongoDB connection closed.");
+  }
 }
+
+app.use(async (_req, res, next) => {
+  try {
+    await connectToMongoDB();
+    next();
+  } catch (error) {
+    console.error("Request failed because MongoDB is unavailable:", error);
+    res.status(503).send({
+      success: false,
+      message: "Database is unavailable",
+    });
+  }
+});
 
 //Verification Middleware
 
@@ -228,7 +260,7 @@ app.post("/user", async (req, res) => {
   }
 });
 
-app.get("/user",verifyToken, async (req, res) => {
+app.get("/user",verifyToken,verifyAdmin, async (req, res) => {
   try {
     const result = await userCollection
       .find()
@@ -244,7 +276,7 @@ app.get("/user",verifyToken, async (req, res) => {
   }
 });
 
-app.get("/user/role/:email", async (req, res) => {
+app.get("/user/role/:email",verifyToken, async (req, res) => {
   try {
     const email = req.params.email;
     const user = await userCollection.findOne({ email });
@@ -295,7 +327,7 @@ app.patch("/user/:id/role", async (req, res) => {
   }
 });
 
-app.delete("/users/:id", async (req, res) => {
+app.delete("/users/:id",verifyToken,verifyAdmin, async (req, res) => {
   try {
     const result = await userCollection.deleteOne({
       _id: new ObjectId(req.params.id),
@@ -321,7 +353,7 @@ app.delete("/users/:id", async (req, res) => {
   }
 });
 
-app.get("/api/my/doctors", async (req, res) => {
+app.get("/api/my/doctors",verifyToken,verifyDoctor, async (req, res) => {
   const query = {};
   if (req.query.doctorID) {
     query.doctorID = req.query.doctorID;
@@ -330,7 +362,7 @@ app.get("/api/my/doctors", async (req, res) => {
   res.send(result);
 });
 
-app.post("/api/doctors", async (req, res) => {
+app.post("/api/doctors",verifyToken,verifyDoctor, async (req, res) => {
   if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
     return res.status(400).send({
       success: false,
@@ -358,7 +390,7 @@ app.get("/api/doctors", async (req, res) => {
   res.send(result);
 });
 
-app.get("/api/my/patients", async (req, res) => {
+app.get("/api/my/patients",verifyToken,verifyPatient, async (req, res) => {
   const { patientID, userID } = req.query;
   const query = userID
     ? { $or: [{ userID }, { patientID: userID }] }
@@ -378,7 +410,7 @@ app.get("/api/my/patients", async (req, res) => {
   }
 });
 
-app.post("/api/patients", async (req, res) => {
+app.post("/api/patients",verifyToken,verifyPatient, async (req, res) => {
   try {
     const patient = req.body;
 
@@ -400,7 +432,7 @@ app.post("/api/patients", async (req, res) => {
 });
 
 // POST: Create a new appointment
-app.post("/appointments", async (req, res) => {
+app.post("/appointments",verifyToken,verifyPatient, async (req, res) => {
   try {
     const appointment = req.body;
 
@@ -439,7 +471,7 @@ app.post("/appointments", async (req, res) => {
   }
 });
 
-app.get("/api/doctor/all-appointments", async (req, res) => {
+app.get("/api/doctor/all-appointments",verifyToken,verifyDoctor, async (req, res) => {
   if (!req.query.doctorID) {
     return res.status(400).send({ message: "doctorID is required" });
   }
@@ -455,7 +487,7 @@ app.get("/api/doctor/all-appointments", async (req, res) => {
   }
 });
 
-app.get("/api/patient/my-appointments", async (req, res) => {
+app.get("/api/patient/my-appointments",verifyToken,verifyPatient, async (req, res) => {
   if (!req.query.patientID) {
     return res.status(400).send({ message: "patientID is required" });
   }
@@ -471,7 +503,7 @@ app.get("/api/patient/my-appointments", async (req, res) => {
   }
 });
 
-app.patch("/appointments/:id/status", async (req, res) => {
+app.patch("/appointments/:id/status",verifyToken,verifyDoctor, async (req, res) => {
   try {
     const id = req.params.id;
     const { status } = req.body;
@@ -510,7 +542,7 @@ app.patch("/appointments/:id/status", async (req, res) => {
 });
 
 
-app.delete("/appointments/:id", async (req, res) => {
+app.delete("/appointments/:id",verifyToken,verifyDoctor, async (req, res) => {
   try {
     const id = req.params.id;
 
@@ -536,7 +568,7 @@ app.delete("/appointments/:id", async (req, res) => {
   }
 });
 
-// Start Server
+// Start the listener locally; Vercel invokes the exported Express app.
 async function startServer() {
   try {
     await connectToMongoDB();
@@ -550,4 +582,8 @@ async function startServer() {
   }
 }
 
-startServer();
+if (process.env.VERCEL !== "1") {
+  startServer();
+}
+
+export default app;
